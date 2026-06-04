@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Royal Match - Save the King!</title>
+  <style>
+    :root {
+      --tile-size: 50px;
+    }
+    
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #1a1a2e;
+      color: white;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    h1 {
+      margin: 10px 0 5px;
+      font-size: 22px;
+      color: #ffd700;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    }
+
+    .game-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      max-width: 450px;
+    }
+
+    /* 統合されたゲーム盤面のラッパー */
+    .stage-wrapper {
+      position: relative;
+      width: 100%;
+      border: 4px solid #16213e;
+      background-color: #0f3460;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.7);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* 物理描画用の全域Canvas */
+    #physics-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none; /* パズルのクリックを邪魔しない */
+      z-index: 2;
+    }
+
+    /* 救出エリア（上半分） */
+    #rescue-area {
+      position: relative;
+      width: 100%;
+      height: 160px;
+      background: rgba(74, 47, 19, 0.45); /* キャンバスの砂利が見えるように半透明 */
+      border-bottom: 2px solid #16213e;
+      overflow: hidden;
+      z-index: 3;
+    }
+
+    /* 王様オブジェクト */
+    #king {
+      position: absolute;
+      width: 80px;
+      height: 80px;
+      top: 40px;
+      left: 150px; /* 動的に更新されます */
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.1s ease-out;
+    }
+
+    .king-inner {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      font-size: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      filter: drop-shadow(2px 4px 4px rgba(0,0,0,0.5));
+    }
+
+    /* 盾 */
+    .shield {
+      position: absolute;
+      left: -20px;
+      font-size: 32px;
+      animation: pulse 1s infinite alternate;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1) rotate(-5deg); }
+      100% { transform: scale(1.08) rotate(5deg); }
+    }
+
+    /* パズル盤面（最前面） */
+    #board-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+      z-index: 3;
+      background: transparent;
+    }
+
+    .tile {
+      position: absolute;
+      width: var(--tile-size);
+      height: var(--tile-size);
+      transition: transform 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+      cursor: grab;
+      user-select: none;
+    }
+
+    .tile:active {
+      cursor: grabbing;
+    }
+
+    .tile .inner {
+      width: 84%;
+      height: 84%;
+      margin: 8%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: calc(var(--tile-size) * 0.62);
+      background: rgba(15, 34, 64, 0.9); /* 砂利が見えるように半透明にしつつ、視認性アップ */
+      border: 2px solid rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      box-shadow: inset 0 2px 4px rgba(255,255,255,0.15), 0 4px 8px rgba(0,0,0,0.4);
+      transition: transform 0.2s, opacity 0.2s;
+    }
+
+    .tile.removing .inner {
+      transform: scale(0);
+      opacity: 0;
+    }
+
+    /* 砂利の流れる背景、ブロックがない部分を示すグリッドセル */
+    .grid-cell-bg {
+      position: absolute;
+      width: var(--tile-size);
+      height: var(--tile-size);
+      box-sizing: border-box;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      z-index: 1;
+    }
+
+    /* 操作不可ロック */
+    #board-container.locked {
+      pointer-events: none;
+    }
+
+    /* ステータスと説明 */
+    .game-status {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      padding: 10px 15px;
+      box-sizing: border-box;
+      background: #16213e;
+      border-radius: 8px;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+
+    .status-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .status-val {
+      font-size: 18px;
+      font-weight: bold;
+      color: #ffd700;
+    }
+
+    /* ゲームオーバー/クリアモーダル */
+    .overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .overlay.show {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal {
+      background: #16213e;
+      padding: 30px;
+      border-radius: 16px;
+      text-align: center;
+      border: 3px solid #ffd700;
+      max-width: 320px;
+    }
+
+    .modal h2 {
+      margin-top: 0;
+      font-size: 28px;
+    }
+
+    .modal p {
+      font-size: 16px;
+      margin: 15px 0 25px;
+    }
+
+    .btn {
+      padding: 10px 25px;
+      border: none;
+      border-radius: 25px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      background: #e94560;
+      color: white;
+      transition: background 0.2s;
+    }
+
+    .btn:hover {
+      background: #ff5e7e;
+    }
+
+    /* コントロール */
+    .controls-panel {
+      margin-top: 8px;
+      display: flex;
+      gap: 10px;
+    }
+
+    .controls-panel select {
+      background: #16213e;
+      color: white;
+      border: 1px solid #ffd700;
+      padding: 5px 10px;
+      border-radius: 5px;
+    }
+
+    .bottom-info {
+      font-size: 12px;
+      color: #8e9bb0;
+      text-align: center;
+      margin: 12px 10px;
+      max-width: 400px;
+    }
+    
+    /* 通知メッセージ表示 */
+    #game-toast {
+      position: absolute;
+      top: 180px;
+      background: rgba(233, 69, 96, 0.95);
+      color: white;
+      padding: 8px 20px;
+      border-radius: 20px;
+      font-size: 16px;
+      font-weight: bold;
+      z-index: 50;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    }
+
+    /* ゲーム開始前のオーバーレイ表示 */
+    #start-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.4);
+      z-index: 4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: opacity 0.3s ease;
+      pointer-events: none; /* 下のパズル操作でも消えるようにする */
+    }
+
+    .start-prompt {
+      background: rgba(22, 33, 62, 0.9);
+      border: 2px solid #ffd700;
+      padding: 10px 20px;
+      border-radius: 30px;
+      font-weight: bold;
+      font-size: 18px;
+      color: #ffd700;
+      animation: flash 1.2s infinite alternate;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+      pointer-events: auto;
+    }
+
+    @keyframes flash {
+      0% { opacity: 0.6; transform: scale(0.95); }
+      100% { opacity: 1; transform: scale(1.05); }
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Save the King! (Royal Match)</h1>
+
+  <div class="game-container">
+    <!-- ステータスバー -->
+    <div class="game-status">
+      <div class="status-item">
+        <span>Gravel in Chamber</span>
+        <span class="status-val" id="gravel-count">3500</span>
+      </div>
+      <div class="status-item">
+        <span>King Status</span>
+        <span class="status-val" id="king-safety" style="color: #2ed573;">SAFE</span>
+      </div>
+      <div class="status-item">
+        <span>Score</span>
+        <span class="status-val" id="score">0</span>
+      </div>
+    </div>
+
+    <!-- 設定 -->
+    <div class="controls-panel">
+      <label style="font-size:13px; align-self:center;">Grid Size:</label>
+      <select id="grid-preset" onchange="changeGridPreset()">
+        <option value="8x8">8 x 8 (Standard)</option>
+        <option value="6x6">6 x 6 (Small)</option>
+        <option value="9x9">9 x 9 (Hard)</option>
+      </select>
+      <button class="btn" style="font-size:12px; padding: 5px 12px; border-radius:4px;" onclick="initGame()">Reset</button>
+    </div>
+
+    <!-- 統合ステージ（救出エリア＋パズル） -->
+    <div class="stage-wrapper" style="margin-top: 10px;">
+      <div id="game-toast">START!</div>
+      
+      <!-- スタートガイドスクリーン -->
+      <div id="start-screen">
+        <div class="start-prompt" onclick="triggerStartGame()">TAP TO START</div>
+      </div>
+
+      <canvas id="physics-canvas"></canvas>
+      
+      <!-- 救出エリア -->
+      <div id="rescue-area">
+        <!-- 王様 -->
+        <div id="king">
+          <div class="king-inner">
+            👑
+            <div class="shield">🛡️</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- パズル盤面 -->
+      <div id="board-container"></div>
+    </div>
+
+    <div class="bottom-info">
+      💡 <b>遊び方:</b> ブロックを動かすか、TAP TO STARTを押すとゲームが始まります。<b>ブロックは有限</b>なので、消すとそこは空洞になります。何もしないと<b>15秒で押し潰されてしまいます</b>。効率的に1列目の通り道を作って、砂利を全て下へ落としましょう！
+    </div>
+  </div>
+
+  <!-- ゲームオーバーモーダル -->
+  <div class="overlay" id="overlay-gameover">
+    <div class="modal" style="border-color: #e94560;">
+      <h2 style="color: #e94560;">Game Over!</h2>
+      <p>王様がトゲに刺されてしまいました！👑💦<br>もっと早く砂利の抜け道を作りましょう！</p>
+      <button class="btn" onclick="closeOverlay('overlay-gameover'); initGame();">Try Again</button>
+    </div>
+  </div>
+
+  <!-- ゲームクリアモーダル -->
+  <div class="overlay" id="overlay-win">
+    <div class="modal" style="border-color: #ffd700;">
+      <h2 style="color: #ffd700;">Victory!</h2>
+      <p>素晴らしい！全ての砂利を流し落とし、王様の安全を確保しました！👑✨</p>
+      <button class="btn" onclick="closeOverlay('overlay-win'); initGame();">Play Again</button>
+    </div>
+  </div>
+
+  <script>
+    // --- ゲーム基本設定 ---
+    const TILE_TYPES = ['💎', '🔴', '🟢', '🟡', '🟣', '🔵', '🟠'];
+    const KINDS = 5; 
+    const ANIMATION_MS = 250;
+    const RESCUE_HEIGHT = 160; // 救出エリアの高さ(px)
+    
+    let ROWS = 8;
+    let COLS = 8;
+    let TILE_SIZE = 50;
+    
+    let board = [];
+    let score = 0;
+    let isAnimating = false;
+    let isGameOver = false;
+    let isGameStarted = false; // 最初のスワップ操作またはスタートボタン押下でtrueになる
+
+    // --- 砂利物理システム用の変数 ---
+    let canvas, ctx;
+    let gravels = [];
+    const TOTAL_GRAVEL_TARGET = 3500; // 10倍の砂利量(3,500個)
+    let gravelStock = TOTAL_GRAVEL_TARGET; // 未出現のストック数
+    const GRAVEL_RADIUS = 6.2; // 粒子をちょうど良いサイズに調整して隙間の抜けを完璧防止
+    
+    // 物理的に画面内で演算する最大アクティブ数（CPU負荷対策：画面内の実演算は最大260個に制限）
+    const MAX_ACTIVE_GRAVELS = 260; 
+    
+    // 王様の状態（X座標制御）
+    // 安全：150px (左側) , 危険（トゲ）：310px (右側)
+    let kingX = 150; 
+    const KING_SAFE_X = 150; 
+    const KING_SPIKE_X = 310; 
+    let lastTime = performance.now();
+
+    // DOM要素
+    const boardEl = document.getElementById('board-container');
+    const scoreEl = document.getElementById('score');
+    const gravelCountEl = document.getElementById('gravel-count');
+    const kingSafetyEl = document.getElementById('king-safety');
+    const kingEl = document.getElementById('king');
+    const toastEl = document.getElementById('game-toast');
+    const startScreenEl = document.getElementById('start-screen');
+
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+    // --- グリッドサイズプリセット ---
+    function changeGridPreset() {
+      const val = document.getElementById('grid-preset').value;
+      if (val === '6x6') { ROWS = 6; COLS = 6; }
+      else if (val === '9x9') { ROWS = 9; COLS = 9; }
+      else { ROWS = 8; COLS = 8; }
+      initGame();
+    }
+
+    // --- サイズ調整（レスポンシブ） ---
+    function updateDimensions() {
+      const containerWidth = Math.min(window.innerWidth * 0.95, 400);
+      TILE_SIZE = containerWidth / COLS;
+      
+      document.documentElement.style.setProperty('--tile-size', `${TILE_SIZE}px`);
+      
+      const boardWidth = COLS * TILE_SIZE;
+      const boardHeight = ROWS * TILE_SIZE;
+      
+      boardEl.style.width = `${boardWidth}px`;
+      boardEl.style.height = `${boardHeight}px`;
+
+      // キャンバスを救出エリアとパズルエリアの合算サイズにする
+      canvas.width = boardWidth;
+      canvas.height = RESCUE_HEIGHT + boardHeight;
+
+      // タイル位置更新
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          if (board[r] && board[r][c]) {
+            setTilePos(board[r][c].el, r, c);
+          }
+        }
+      }
+    }
+
+    // --- ゲームの初期化 ---
+    function initGame() {
+      isGameOver = false;
+      isGameStarted = false;
+      score = 0;
+      scoreEl.innerText = score;
+      isAnimating = false;
+      boardEl.classList.remove('locked');
+      boardEl.innerHTML = '';
+      board = [];
+      
+      closeOverlay('overlay-gameover');
+      closeOverlay('overlay-win');
+      startScreenEl.style.opacity = "1";
+      startScreenEl.style.display = "flex";
+
+      canvas = document.getElementById('physics-canvas');
+      ctx = canvas.getContext('2d');
+      
+      updateDimensions();
+
+      // パズル盤面生成 (初期は全面にブロック配置)
+      for (let r = 0; r < ROWS; r++) {
+        board[r] = [];
+        for (let c = 0; c < COLS; c++) {
+          let bgCell = document.createElement('div');
+          bgCell.className = 'grid-cell-bg';
+          bgCell.style.left = `${c * TILE_SIZE}px`;
+          bgCell.style.top = `${r * TILE_SIZE}px`;
+          boardEl.appendChild(bgCell);
+
+          let type = getRandomTypeForInit(r, c);
+          let tileEl = createTileElement(r, c, type);
+          board[r][c] = { type, el: tileEl };
+          boardEl.appendChild(tileEl);
+        }
+      }
+
+      // 王様の初期位置を設定
+      kingX = KING_SAFE_X;
+      updateKingUI();
+
+      // 砂利の初期化
+      initGravels();
+      lastTime = performance.now();
+    }
+
+    function getRandomTypeForInit(r, c) {
+      let available = TILE_TYPES.slice(0, KINDS);
+      while (true) {
+        let type = available[Math.floor(Math.random() * available.length)];
+        if (c >= 2 && board[r][c-1] && board[r][c-1].type === type && board[r][c-2] && board[r][c-2].type === type) continue;
+        if (r >= 2 && board[r-1][c] && board[r-1][c].type === type && board[r-2][c] && board[r-2][c].type === type) continue;
+        return type;
+      }
+    }
+
+    function createTileElement(r, c, type) {
+      let tile = document.createElement('div');
+      tile.className = 'tile';
+      let inner = document.createElement('div');
+      inner.className = 'inner';
+      inner.innerText = type;
+      tile.appendChild(inner);
+      setTilePos(tile, r, c);
+      return tile;
+    }
+
+    function setTilePos(el, r, c) {
+      el.style.transform = `translate(${c * TILE_SIZE}px, ${r * TILE_SIZE}px)`;
+    }
+
+    // ゲームのアクティブスタート処理
+    function triggerStartGame() {
+      if (!isGameStarted) {
+        isGameStarted = true;
+        startScreenEl.style.opacity = "0";
+        setTimeout(() => {
+          startScreenEl.style.display = "none";
+        }, 300);
+        showToast("START!");
+      }
+    }
+
+    // トースト通知の表示
+    function showToast(text) {
+      toastEl.innerText = text;
+      toastEl.style.opacity = "1";
+      setTimeout(() => {
+        toastEl.style.opacity = "0";
+      }, 1500);
+    }
+
+    // --- 砂利物理システム ---
+    function initGravels() {
+      gravels = [];
+      gravelStock = TOTAL_GRAVEL_TARGET; // ストックを3,500個に設定
+      gravelCountEl.innerText = gravelStock;
+
+      // スタート前に画面内に敷き詰められる最大初期アクティブ数
+      let initialActiveCount = Math.min(MAX_ACTIVE_GRAVELS, 240);
+
+      // 初期配置：左側の部屋（列0〜1付近）にぎっしりと美しくハニカム構造で並べる
+      let spacing = GRAVEL_RADIUS * 1.95;
+      let colLimit = Math.floor((TILE_SIZE * 1.5) / spacing);
+      if (colLimit < 2) colLimit = 2;
+
+      for (let i = 0; i < initialActiveCount; i++) {
+        let colIdx = i % colLimit;
+        let rowIdx = Math.floor(i / colLimit);
+        
+        let xOffset = (rowIdx % 2) * (spacing * 0.35);
+        let px = 15 + colIdx * spacing + xOffset;
+        let py = (RESCUE_HEIGHT - 35) - rowIdx * (spacing * 0.86); // 六方密充填の高さ
+
+        gravels.push({
+          x: px,
+          y: py,
+          vx: 0,
+          vy: 0,
+          active: true,
+          radius: GRAVEL_RADIUS + (Math.random() * 0.4 - 0.2) // サイズを揃え気味にして安定化
+        });
+
+        gravelStock--; // ストックから差し引く
+      }
+    }
+
+    // 砂利の補充（ストックがある場合、アクティブ数が減ったら自動湧き出し）
+    function spawnGravels() {
+      let activeCount = gravels.filter(g => g.active).length;
+      
+      // 最大物理演算数を超えず、かつストックがある場合に新規スポーン
+      if (activeCount < MAX_ACTIVE_GRAVELS && gravelStock > 0) {
+        let spawnCount = Math.min(6, MAX_ACTIVE_GRAVELS - activeCount, gravelStock);
+        for (let i = 0; i < spawnCount; i++) {
+          gravels.push({
+            // 排水口（列0）の上部付近に供給
+            x: Math.random() * (TILE_SIZE * 1.2) + 12,
+            y: -20 - (Math.random() * 40),
+            vx: (Math.random() - 0.5) * 0.2,
+            vy: Math.random() * 0.5 + 0.5,
+            active: true,
+            radius: GRAVEL_RADIUS + (Math.random() * 0.4 - 0.2)
+          });
+          gravelStock--;
+        }
+      }
+    }
+
+    // 物理シミュレーションのアップデート
+    function updatePhysics(dt) {
+      // 1. スタート前は物理演算をフリーズさせて超ぎっしり感を絶対保持
+      if (!isGameStarted) {
+        return;
+      }
+      if (isGameOver) return;
+
+      // 砂利を自動補充
+      spawnGravels();
+
+      // パズルのブロック衝突マップ（r,c にブロックが存在するか）
+      let blockMap = [];
+      for (let r = 0; r < ROWS; r++) {
+        blockMap[r] = [];
+        for (let c = 0; c < COLS; c++) {
+          blockMap[r][c] = (board[r] && board[r][c] !== null);
+        }
+      }
+
+      // 救出エリア（y < RESCUE_HEIGHT）にあって、王様より左にあり圧力を加えているアクティブ砂利数
+      let activePushingGravels = 0;
+
+      for (let i = 0; i < gravels.length; i++) {
+        let p = gravels[i];
+        if (!p.active) continue;
+
+        if (p.y < RESCUE_HEIGHT && p.x < kingX) {
+          activePushingGravels++;
+        }
+
+        // --- 超低負荷・流体（水・リキッド）物理チューニング ---
+        p.vy += 0.25; // 重力
+        
+        // 速度減衰（ダンピング）を劇的に高めることで、跳ね返りを無くし、
+        // 「サラサラとした液体」や「もったりとした砂」のような安定した流れを実現。
+        p.vx *= 0.84;
+        p.vy *= 0.84;
+
+        let nextX = p.x + p.vx;
+        let nextY = p.y + p.vy;
+
+        // --- 境界コライダー (すり抜け・壁越え防止) ---
+        
+        // 1. 左右の壁
+        if (nextX < p.radius) {
+          nextX = p.radius;
+          p.vx = 0;
+        } else if (nextX > canvas.width - p.radius) {
+          nextX = canvas.width - p.radius;
+          p.vx = 0;
+        }
+
+        // 2. 縦の物理仕切り壁（x = TILE_SIZE * 1.5, y = 0 から RESCUE_HEIGHT - 90 まで）
+        // 砂利が絶対に右（王様の部屋）へ漏れない完璧な縦壁
+        const wallX = TILE_SIZE * 1.5;
+        const wallHeight = RESCUE_HEIGHT - 90;
+        if (p.y < wallHeight + p.radius) {
+          if (p.x < wallX && nextX >= wallX - p.radius) {
+            nextX = wallX - p.radius;
+            p.vx = 0;
+          } else if (p.x > wallX && nextX <= wallX + p.radius) {
+            nextX = wallX + p.radius;
+            p.vx = 0;
+          }
+        }
+
+        // 3. 王様の安全平台床コライダー（x >= TILE_SIZE * 1.5, y = RESCUE_HEIGHT - 30）
+        const platformY = RESCUE_HEIGHT - 30;
+        const platformLeftX = TILE_SIZE * 1.5;
+        if (nextX >= platformLeftX - p.radius) {
+          if (nextY >= platformY - p.radius && p.y <= platformY) {
+            nextY = platformY - p.radius;
+            p.vy = 0;
+            if (nextX < platformLeftX + 30) {
+              p.vx -= 0.5; // 左の排水口へ自然に滑り落とす
+            }
+          }
+        }
+
+        // 4. 床面コライダー (排水口は Column 0 [x < TILE_SIZE] のみの 1ブロック幅！)
+        // 列0以外の床面は完全に塞がっているため、砂利は列0のブロックが消えた隙間からしか下に落ちない
+        const floorY = RESCUE_HEIGHT;
+        const drainLimitX = TILE_SIZE;
+        if (nextX >= drainLimitX - p.radius) {
+          if (nextY >= floorY - p.radius && p.y <= floorY) {
+            nextY = floorY - p.radius;
+            p.vy = 0;
+            p.vx -= 0.6; // 左方向（列0の穴）へ滑る
+          }
+        }
+
+        // 5. 王様の盾コライダー（x = kingX, y = platformY から上部）
+        if (nextY > 20 && nextY < platformY) {
+          if (p.x <= kingX && nextX >= kingX - p.radius) {
+            nextX = kingX - p.radius;
+            p.vx = -p.vx * 0.05; // 完全に反発を抑えてもたれかからせる
+          }
+        }
+
+        // 6. パズルブロック衝突（y >= RESCUE_HEIGHT）
+        if (nextY >= RESCUE_HEIGHT) {
+          let cellC = Math.floor(nextX / TILE_SIZE);
+          let cellR = Math.floor((nextY - RESCUE_HEIGHT) / TILE_SIZE);
+
+          if (cellR >= 0 && cellR < ROWS && cellC >= 0 && cellC < COLS) {
+            if (blockMap[cellR][cellC]) {
+              // ブロックが存在する：もったりと上に積もらせ、滑らせる
+              let blockTop = RESCUE_HEIGHT + cellR * TILE_SIZE;
+              let blockLeft = cellC * TILE_SIZE;
+              let blockRight = blockLeft + TILE_SIZE;
+
+              let distToTop = Math.abs(p.y - blockTop);
+              let distToLeft = Math.abs(p.x - blockLeft);
+              let distToRight = Math.abs(p.x - blockRight);
+
+              let minDist = Math.min(distToTop, distToLeft, distToRight);
+
+              if (minDist === distToTop) {
+                nextY = blockTop - p.radius;
+                p.vy = 0;
+                p.vx += (p.x < blockLeft + TILE_SIZE/2) ? -0.3 : 0.3; // 隙間へ誘導
+              } else if (minDist === distToLeft) {
+                nextX = blockLeft - p.radius;
+                p.vx = 0;
+              } else {
+                nextX = blockRight + p.radius;
+                p.vx = 0;
+              }
+            }
+          }
+        }
+
+        // 7. 砂利同士の完全非弾性押し出し（めり込み投影法） ＋ なめらかな速度同期（流体・粘性効果）
+        for (let j = i + 1; j < gravels.length; j++) {
+          let p2 = gravels[j];
+          if (!p2.active) continue;
+          
+          let dx = p2.x - p.x;
+          let dy = p2.y - p.y;
+          let distSq = dx * dx + dy * dy;
+          let minDist = p.radius + p2.radius;
+          
+          if (distSq < minDist * minDist) {
+            let dist = Math.sqrt(distSq);
+            if (dist === 0) dist = 0.1;
+            let overlap = minDist - dist;
+            
+            // 静的押し出し（めり込みを100%解消）
+            let pushX = (dx / dist) * overlap * 0.5;
+            let pushY = (dy / dist) * overlap * 0.5;
+            p.x -= pushX;
+            p.y -= pushY;
+            p2.x += pushX;
+            p2.y += pushY;
+            
+            // 水のような「滑らかな流体粘性効果（Viscosity）」:
+            // 衝突時にお互いの速度の差を滑らかに中和することで、
+            // 粒子が集まって「サラサラとしたひとかたまりの液体」のように流れます。
+            let rvx = p2.vx - p.vx;
+            let rvy = p2.vy - p.vy;
+            p.vx += rvx * 0.25;
+            p.vy += rvy * 0.25;
+            p2.vx -= rvx * 0.25;
+            p2.vy -= rvy * 0.25;
+          }
+        }
+
+        p.x = nextX;
+        p.y = nextY;
+
+        // ボード底辺を抜けたら、下端から完全に流れ落ちたとみなし非アクティブ化
+        if (p.y > canvas.height) {
+          p.active = false;
+          // 砂利が10倍に増えたため、王様を安全側に押し戻す力を調整
+          if (isGameStarted) {
+            kingX = Math.max(KING_SAFE_X, kingX - 0.12); // 流出に比例して優しく押し戻される
+          }
+          score += 15;
+        }
+      }
+
+      // 残りの「総砂利数（ストック ＋ 画面内アクティブ総数）」
+      let totalGravelLeft = gravelStock + gravels.filter(g => g.active).length;
+      gravelCountEl.innerText = totalGravelLeft;
+
+      // --- 王様の挙動（緊迫感のある15秒ルール） ---
+      if (isGameStarted) {
+        // チャンバー内に砂利が残っている割合で押し出す力を正規化
+        let chamberGravelRatio = Math.min(1.0, activePushingGravels / 150); 
+        
+        if (totalGravelLeft > 0 && activePushingGravels > 0) {
+          // 約15秒で端まで押し潰されるスピードにスケール。砂利の10倍増量に影響されないよう一定に制御
+          let slideSpeed = 10.66 * chamberGravelRatio; 
+          kingX += slideSpeed * dt; 
+        } else {
+          // 押し付ける砂利が完全に無くなったら：王様は安全な初期位置（左端）へなめらかに戻る
+          kingX += (KING_SAFE_X - kingX) * 0.08; 
+        }
+      }
+      
+      updateKingUI();
+
+      // クリア判定：砂利ストック・画面内粒子が完全にゼロになり、王様が初期位置（左端）に戻って安全が確定した時
+      if (isGameStarted && totalGravelLeft === 0 && Math.abs(kingX - KING_SAFE_X) < 1.0 && !isGameOver) {
+        showOverlay('overlay-win');
+        isGameOver = true;
+      } else if (kingX >= KING_SPIKE_X && !isGameOver) {
+        showOverlay('overlay-gameover');
+        isGameOver = true;
+      }
+    }
+
+    function updateKingUI() {
+      kingEl.style.transform = `translateX(${kingX - KING_SAFE_X}px)`;
+      
+      let dangerPercent = (kingX - KING_SAFE_X) / (KING_SPIKE_X - KING_SAFE_X);
+      if (dangerPercent > 0.75) {
+        kingSafetyEl.innerText = "🚨 DANGER!! 🚨";
+        kingSafetyEl.style.color = "#ff4757";
+        kingEl.style.filter = "hue-rotate(320deg) saturate(1.8) drop-shadow(0px 0px 8px red)";
+      } else if (dangerPercent > 0.4) {
+        kingSafetyEl.innerText = "⚠️ WARNING";
+        kingSafetyEl.style.color = "#ffa502";
+        kingEl.style.filter = "none";
+      } else if (isGameStarted && gravelStock + gravels.filter(g => g.active).length === 0) {
+        kingSafetyEl.innerText = "✨ SAFE & CLEAR! ✨";
+        kingSafetyEl.style.color = "#ffd700";
+        kingEl.style.filter = "drop-shadow(0px 0px 8px #ffd700)";
+      } else {
+        kingSafetyEl.innerText = "💚 SAFE";
+        kingSafetyEl.style.color = "#2ed573";
+        kingEl.style.filter = "none";
+      }
+    }
+
+    // 物理描写
+    function drawPhysics() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 1. 救出エリアのレンガ背景
+      ctx.fillStyle = '#3e2723';
+      ctx.fillRect(0, 0, canvas.width, RESCUE_HEIGHT);
+      
+      ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+      ctx.lineWidth = 2;
+      for (let y = 15; y < RESCUE_HEIGHT; y += 15) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+
+      // 2. 王様が立つプラットフォーム床（左端 TILE_SIZE * 1.5 以外の右半分）
+      ctx.fillStyle = '#2c3e50';
+      ctx.fillRect(TILE_SIZE * 1.5, RESCUE_HEIGHT - 30, canvas.width - (TILE_SIZE * 1.5), 30);
+      ctx.strokeStyle = '#34495e';
+      ctx.strokeRect(TILE_SIZE * 1.5, RESCUE_HEIGHT - 30, canvas.width - (TILE_SIZE * 1.5), 30);
+
+      // 3. 頑丈な床面（左端の列0 [drainLimitX = TILE_SIZE] 以外をふさぐ仕切り床）
+      ctx.fillStyle = '#34495e';
+      ctx.fillRect(TILE_SIZE, RESCUE_HEIGHT - 4, canvas.width - TILE_SIZE, 4);
+
+      // 4. 縦の頑丈な物理仕切り壁
+      ctx.fillStyle = '#5d4037';
+      ctx.fillRect(TILE_SIZE * 1.5 - 6, 0, 12, RESCUE_HEIGHT - 90);
+      ctx.strokeStyle = '#4e342e';
+      ctx.strokeRect(TILE_SIZE * 1.5 - 6, 0, 12, RESCUE_HEIGHT - 90);
+
+      // 5. 危険なトゲ
+      ctx.fillStyle = '#e74c3c';
+      ctx.beginPath();
+      for (let i = 0; i < 3; i++) {
+        let sy = 25 + i * 35;
+        ctx.moveTo(canvas.width, sy);
+        ctx.lineTo(canvas.width - 25, sy + 12);
+        ctx.lineTo(canvas.width, sy + 24);
+      }
+      ctx.fill();
+
+      // 6. 水のイメージの滑らかな砂利（有限粒子）の描画
+      // 液体を連想させる綺麗なブルーグレーに変更し、水のような光沢感をアップ！
+      ctx.fillStyle = '#4a7c59'; // しっとりとした質感の石/砂色
+      ctx.strokeStyle = '#2c3e50';
+      ctx.lineWidth = 1.2;
+
+      for (let i = 0; i < gravels.length; i++) {
+        let p = gravels[i];
+        if (!p.active) continue;
+
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fillStyle = p.y < RESCUE_HEIGHT ? '#57606f' : '#3c6382'; // 下に落ちると水流っぽく青く変化
+        ctx.fill();
+        ctx.stroke();
+
+        // 流体らしい美しいハイライト（光沢）
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.beginPath();
+        ctx.arc(p.x - p.radius * 0.3, p.y - p.radius * 0.3, p.radius * 0.25, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function loop() {
+      let now = performance.now();
+      let dt = (now - lastTime) / 1000; 
+      lastTime = now;
+
+      if (dt > 0.1) dt = 0.1; 
+
+      updatePhysics(dt);
+      drawPhysics();
+      scoreEl.innerText = score;
+      requestAnimationFrame(loop);
+    }
+
+    // --- マッチ3パズル操作（スワイプ） ---
+    let startX, startY, startR, startC;
+
+    boardEl.addEventListener('pointerdown', (e) => {
+      if (isAnimating || isGameOver) return;
+      e.preventDefault();
+
+      const rect = boardEl.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      startC = Math.floor(x / TILE_SIZE);
+      startR = Math.floor(y / TILE_SIZE);
+      
+      if (startC < 0 || startC >= COLS || startR < 0 || startR >= ROWS) return;
+      if (!board[startR][startC]) return;
+      
+      startX = e.clientX;
+      startY = e.clientY;
+
+      document.addEventListener('pointermove', onPointerMove, { passive: false });
+      document.addEventListener('pointerup', onPointerUp);
+    });
+
+    function onPointerMove(e) {
+      if (isAnimating || isGameOver) return;
+      e.preventDefault();
+
+      let dx = e.clientX - startX;
+      let dy = e.clientY - startY;
+      const THRESHOLD = TILE_SIZE * 0.35; 
+      
+      if (Math.abs(dx) > THRESHOLD || Math.abs(dy) > THRESHOLD) {
+        let r2 = startR;
+        let c2 = startC;
+        
+        if (Math.abs(dx) > Math.abs(dy)) {
+          c2 = dx > 0 ? startC + 1 : startC - 1;
+        } else {
+          r2 = dy > 0 ? startR + 1 : startR - 1;
+        }
+        
+        document.removeEventListener('pointermove', onPointerMove);
+        document.removeEventListener('pointerup', onPointerUp);
+
+        if (r2 >= 0 && r2 < ROWS && c2 >= 0 && c2 < COLS) {
+          // 動かした瞬間にゲームを開始する（タイマーと物理重力が始動！）
+          triggerStartGame();
+          executeSwap(startR, startC, r2, c2);
+        }
+      }
+    }
+
+    function onPointerUp(e) {
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+    }
+
+    async function executeSwap(r1, c1, r2, c2) {
+      if (isAnimating || isGameOver) return;
+      lockBoard();
+
+      let t1 = board[r1][c1];
+      let t2 = board[r2][c2];
+
+      if (!t1 || !t2) {
+        unlockBoard();
+        return;
+      }
+
+      setTilePos(t1.el, r2, c2);
+      setTilePos(t2.el, r1, c1);
+
+      board[r1][c1] = t2;
+      board[r2][c2] = t1;
+
+      await sleep(ANIMATION_MS);
+
+      let matches = findMatches();
+      
+      if (matches.length > 0) {
+        await processMatches(matches);
+      } else {
+        // マッチしなければ元に戻す
+        setTilePos(t1.el, r1, c1);
+        setTilePos(t2.el, r2, c2);
+        board[r1][c1] = t1;
+        board[r2][c2] = t2;
+        await sleep(ANIMATION_MS);
+        unlockBoard();
+      }
+    }
+
+    function findMatches() {
+      let matchedSet = new Set();
+      
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS - 2; c++) {
+          let t1 = board[r][c];
+          if (!t1) continue;
+          if (t1.type === board[r][c+1]?.type && t1.type === board[r][c+2]?.type) {
+            matchedSet.add(`${r},${c}`);
+            matchedSet.add(`${r},${c+1}`);
+            matchedSet.add(`${r},${c+2}`);
+            let k = c + 3;
+            while (k < COLS && board[r][k]?.type === t1.type) {
+              matchedSet.add(`${r},${k}`);
+              k++;
+            }
+          }
+        }
+      }
+
+      for (let c = 0; c < COLS; c++) {
+        for (let r = 0; r < ROWS - 2; r++) {
+          let t1 = board[r][c];
+          if (!t1) continue;
+          if (t1.type === board[r+1][c]?.type && t1.type === board[r+2][c]?.type) {
+            matchedSet.add(`${r},${c}`);
+            matchedSet.add(`${r+1},${c}`);
+            matchedSet.add(`${r+2},${c}`);
+            let k = r + 3;
+            while (k < ROWS && board[k][c]?.type === t1.type) {
+              matchedSet.add(`${k},${c}`);
+              k++;
+            }
+          }
+        }
+      }
+
+      return Array.from(matchedSet).map(str => {
+        let [r, c] = str.split(',').map(Number);
+        return { r, c };
+      });
+    }
+
+    async function processMatches(matches) {
+      score += matches.length * 15;
+
+      matches.forEach(({ r, c }) => {
+        let tile = board[r][c];
+        if (tile) tile.el.classList.add('removing');
+      });
+
+      await sleep(ANIMATION_MS * 0.8);
+
+      matches.forEach(({ r, c }) => {
+        let tile = board[r][c];
+        if (tile && tile.el.parentNode) {
+          tile.el.parentNode.removeChild(tile.el);
+        }
+        board[r][c] = null;
+      });
+
+      // 隙間が空いたので重力で残りのブロックを下に詰めます
+      await applyGravity();
+    }
+
+    // 重力処理（ブロックを下に詰めるが、上からの新規タイル補充は行いません！）
+    async function applyGravity() {
+      let moved = false;
+
+      for (let c = 0; c < COLS; c++) {
+        let emptyRow = ROWS - 1;
+
+        for (let r = ROWS - 1; r >= 0; r--) {
+          if (board[r][c] !== null) {
+            if (r !== emptyRow) {
+              board[emptyRow][c] = board[r][c];
+              board[r][c] = null;
+              setTilePos(board[emptyRow][c].el, emptyRow, c);
+              moved = true;
+            }
+            emptyRow--;
+          }
+        }
+      }
+
+      if (moved) {
+        await sleep(ANIMATION_MS + 50);
+      }
+
+      // 連鎖のチェック
+      let newMatches = findMatches();
+      if (newMatches.length > 0) {
+        await processMatches(newMatches);
+      } else {
+        unlockBoard();
+      }
+    }
+
+    function lockBoard() {
+      isAnimating = true;
+      boardEl.classList.add('locked');
+    }
+
+    function unlockBoard() {
+      isAnimating = false;
+      boardEl.classList.remove('locked');
+    }
+
+    // --- モーダル管理 ---
+    function showOverlay(id) {
+      document.getElementById(id).classList.add('show');
+    }
+
+    function closeOverlay(id) {
+      document.getElementById(id).classList.remove('show');
+    }
+
+    window.addEventListener('resize', () => {
+      if (canvas) updateDimensions();
+    });
+
+    // 起動
+    window.onload = function() {
+      initGame();
+      loop(); 
+    };
+
+  </script>
+</body>
+</html>

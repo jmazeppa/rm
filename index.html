@@ -432,7 +432,7 @@
     // --- 砂利物理システム用の変数 ---
     let canvas, ctx;
     let gravels = [];
-    const TOTAL_GRAVEL_TARGET = 3500; // 10倍の砂利量(3,500個)
+    const TOTAL_GRAVEL_TARGET = 3000; // 10倍の砂利量(3,500個)
     let gravelStock = TOTAL_GRAVEL_TARGET; // 未出現のストック数
     // クリア基準、早くクリアしすぎないように、でも砂利が残ってたらクリアできないを防ぐ
     const SAFE_GRAVEL_RATIO = 0.01; // 押し返しが可能な砂利の割合
@@ -440,12 +440,12 @@
     let CLEAR_GRAVEL_TARGET = TOTAL_GRAVEL_TARGET * CLEAR_GRAVEL_RATIO; //クリアが可能な砂利の残量
     let SAFE_GRAVEL_TARGET = TOTAL_GRAVEL_TARGET * SAFE_GRAVEL_RATIO; //押し返しが可能な砂利の量
     // 砂利の大きさ
-    const GRAVEL_RADIUS = 7.0; // 粒子をちょうど良いサイズに調整して隙間の抜けを完璧防止 from 6.2
+    const GRAVEL_RADIUS = 9.5; // 粒子をちょうど良いサイズに調整して隙間の抜けを完璧防止 from 6.2
     // --- 超低負荷・流体（水・リキッド）物理チューニング ---
-    const GRAVITY_RATIO = 0.5; // 落下速度 
+    const GRAVITY_RATIO = 1.1; // 落下速度 
     // 速度減衰（ダンピング）を劇的に高めることで、跳ね返りを無くし、
     // 「サラサラとした液体」や「もったりとした砂」のような安定した流れを実現。
-    const VELOCITY_DAMPING_RATIO = 0.84; // 0.84
+    const VELOCITY_DAMPING_RATIO = 0.75; // 0.84
    
     // 物理的に画面内で演算する最大アクティブ数（CPU負荷対策：画面内の実演算は最大260個に制限）
     const MAX_ACTIVE_GRAVELS = 500; 
@@ -726,7 +726,7 @@
 
         // 3. 王様の安全平台床コライダー（x >= TILE_SIZE * 1.5, y = RESCUE_HEIGHT - 30）
         const platformY = RESCUE_HEIGHT - 30;
-        const platformLeftX = TILE_SIZE * 1.5;
+        const platformLeftX = TILE_SIZE * 1.5; //1.5
         if (nextX >= platformLeftX - p.radius) {
           if (nextY >= platformY - p.radius && p.y <= platformY) {
             nextY = platformY - p.radius;
@@ -798,7 +798,7 @@
           let dx = p2.x - p.x;
           let dy = p2.y - p.y;
           let distSq = dx * dx + dy * dy;
-          let minDist = p.radius + p2.radius;
+          let minDist = (p.radius + p2.radius);// * 0.90;
           
           if (distSq < minDist * minDist) {
             let dist = Math.sqrt(distSq);

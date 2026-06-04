@@ -440,12 +440,12 @@
     let CLEAR_GRAVEL_TARGET = TOTAL_GRAVEL_TARGET * CLEAR_GRAVEL_RATIO; //クリアが可能な砂利の残量
     let SAFE_GRAVEL_TARGET = TOTAL_GRAVEL_TARGET * SAFE_GRAVEL_RATIO; //押し返しが可能な砂利の量
     // 砂利の大きさ
-    const GRAVEL_RADIUS = 9.0; // 粒子をちょうど良いサイズに調整して隙間の抜けを完璧防止 from 6.2
+    const GRAVEL_RADIUS = 9.5; // 粒子をちょうど良いサイズに調整して隙間の抜けを完璧防止 from 6.2
     // --- 超低負荷・流体（水・リキッド）物理チューニング ---
     const GRAVITY_RATIO = 1.1; // 落下速度 
     // 速度減衰（ダンピング）を劇的に高めることで、跳ね返りを無くし、
     // 「サラサラとした液体」や「もったりとした砂」のような安定した流れを実現。
-    const VELOCITY_DAMPING_RATIO = 0.79; // 0.84
+    const VELOCITY_DAMPING_RATIO = 0.75; // 0.84
    
     // 物理的に画面内で演算する最大アクティブ数（CPU負荷対策：画面内の実演算は最大260個に制限）
     const MAX_ACTIVE_GRAVELS = 500; 

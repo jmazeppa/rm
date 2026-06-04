@@ -356,6 +356,9 @@
         <option value="8x8">8 x 8 (Standard)</option>
         <option value="6x6">6 x 6 (Small)</option>
         <option value="9x9">9 x 9 (Hard)</option>
+        <option value="10x10">10 x 10 (VeryHard)</option>
+        <option value="11x11">11 x 11 (Hell)</option>
+        <option value="12x12">12 x 12 (Infinity)</option>
       </select>
       <button class="btn" style="font-size:12px; padding: 5px 12px; border-radius:4px;" onclick="initGame()">Reset</button>
     </div>
@@ -412,7 +415,7 @@
   <script>
     // --- ゲーム基本設定 ---
     const TILE_TYPES = ['💎', '🔴', '🟢', '🟡', '🟣', '🔵', '🟠'];
-    const KINDS = 5; 
+    const KINDS = 4; 
     const ANIMATION_MS = 250;
     const RESCUE_HEIGHT = 160; // 救出エリアの高さ(px)
     
@@ -431,10 +434,21 @@
     let gravels = [];
     const TOTAL_GRAVEL_TARGET = 3500; // 10倍の砂利量(3,500個)
     let gravelStock = TOTAL_GRAVEL_TARGET; // 未出現のストック数
-    const GRAVEL_RADIUS = 6.2; // 粒子をちょうど良いサイズに調整して隙間の抜けを完璧防止
-    
+    // クリア基準、早くクリアしすぎないように、でも砂利が残ってたらクリアできないを防ぐ
+    const SAFE_GRAVEL_RATIO = 0.01; // 押し返しが可能な砂利の割合
+    const CLEAR_GRAVEL_RATIO = 0.1; // 画面内に残っててもOKな砂利の割合
+    let CLEAR_GRAVEL_TARGET = TOTAL_GRAVEL_TARGET * CLEAR_GRAVEL_RATIO; //クリアが可能な砂利の残量
+    let SAFE_GRAVEL_TARGET = TOTAL_GRAVEL_TARGET * SAFE_GRAVEL_RATIO; //押し返しが可能な砂利の量
+    // 砂利の大きさ
+    const GRAVEL_RADIUS = 7.0; // 粒子をちょうど良いサイズに調整して隙間の抜けを完璧防止 from 6.2
+    // --- 超低負荷・流体（水・リキッド）物理チューニング ---
+    const GRAVITY_RATIO = 0.5; // 落下速度 
+    // 速度減衰（ダンピング）を劇的に高めることで、跳ね返りを無くし、
+    // 「サラサラとした液体」や「もったりとした砂」のような安定した流れを実現。
+    const VELOCITY_DAMPING_RATIO = 0.84; // 0.84
+   
     // 物理的に画面内で演算する最大アクティブ数（CPU負荷対策：画面内の実演算は最大260個に制限）
-    const MAX_ACTIVE_GRAVELS = 260; 
+    const MAX_ACTIVE_GRAVELS = 500; 
     
     // 王様の状態（X座標制御）
     // 安全：150px (左側) , 危険（トゲ）：310px (右側)
@@ -459,6 +473,9 @@
       const val = document.getElementById('grid-preset').value;
       if (val === '6x6') { ROWS = 6; COLS = 6; }
       else if (val === '9x9') { ROWS = 9; COLS = 9; }
+      else if (val === '10x10') { ROWS = 10; COLS = 10; }
+      else if (val === '11x11') { ROWS = 11; COLS = 11; }
+      else if (val === '12x12') { ROWS = 12; COLS = 12; }      
       else { ROWS = 8; COLS = 8; }
       initGame();
     }
@@ -672,12 +689,12 @@
         }
 
         // --- 超低負荷・流体（水・リキッド）物理チューニング ---
-        p.vy += 0.25; // 重力
+        p.vy += GRAVITY_RATIO; // 重力 // 0.62
         
         // 速度減衰（ダンピング）を劇的に高めることで、跳ね返りを無くし、
         // 「サラサラとした液体」や「もったりとした砂」のような安定した流れを実現。
-        p.vx *= 0.84;
-        p.vy *= 0.84;
+        p.vx *= VELOCITY_DAMPING_RATIO; //0.84;
+        p.vy *= VELOCITY_DAMPING_RATIO; //0.84;
 
         let nextX = p.x + p.vx;
         let nextY = p.y + p.vy;
@@ -789,8 +806,8 @@
             let overlap = minDist - dist;
             
             // 静的押し出し（めり込みを100%解消）
-            let pushX = (dx / dist) * overlap * 0.5;
-            let pushY = (dy / dist) * overlap * 0.5;
+            let pushX = (dx / dist) * overlap * 0.50; // 0.5
+            let pushY = (dy / dist) * overlap * 0.50; // 0.5
             p.x -= pushX;
             p.y -= pushY;
             p2.x += pushX;
@@ -831,7 +848,8 @@
         // チャンバー内に砂利が残っている割合で押し出す力を正規化
         let chamberGravelRatio = Math.min(1.0, activePushingGravels / 150); 
         
-        if (totalGravelLeft > 0 && activePushingGravels > 0) {
+//        if (totalGravelLeft > 0 && activePushingGravels > 0) {
+        if (totalGravelLeft > 0 && activePushingGravels > SAFE_GRAVEL_TARGET) {
           // 約15秒で端まで押し潰されるスピードにスケール。砂利の10倍増量に影響されないよう一定に制御
           let slideSpeed = 10.66 * chamberGravelRatio; 
           kingX += slideSpeed * dt; 
@@ -843,9 +861,11 @@
       
       updateKingUI();
 
-      // クリア判定：砂利ストック・画面内粒子が完全にゼロになり、王様が初期位置（左端）に戻って安全が確定した時
-      if (isGameStarted && totalGravelLeft === 0 && Math.abs(kingX - KING_SAFE_X) < 1.0 && !isGameOver) {
-        showOverlay('overlay-win');
+      // クリア判定：砂利ストック・画面内粒子が基準以下、王様が初期位置（左端）に戻って安全が確定した時
+      //if (isGameStarted && totalGravelLeft < CLEAR_GRAVEL_TARGET && Math.abs(kingX - KING_SAFE_X) < 1.0 && !isGameOver) {
+      // クリア判定：砂利ストック・画面内粒子が基準以下、王様が初期位置（左端）に戻って安全が確定した時
+      if (isGameStarted && totalGravelLeft < CLEAR_GRAVEL_TARGET && Math.abs(kingX - KING_SAFE_X) < 1.0 && !isGameOver) {
+       showOverlay('overlay-win');
         isGameOver = true;
       } else if (kingX >= KING_SPIKE_X && !isGameOver) {
         showOverlay('overlay-gameover');
